@@ -4,9 +4,9 @@ import uuid
 import time
 import ogr
 import shapely
+#from shapely import wkt
 import ifcopenshell
 from ifcopenshell.template import TEMPLATE, create, DEFAULTS
-
 
 
 ####################################################################################
@@ -118,6 +118,7 @@ class Ogr2Ifc:
 
         # Save ifc file
         self.ifcfile.write(bim_file_path)
+        print(f'File written to {bim_file_path}')
 
     def __del__(self):
         self.dataSource.Destroy()
@@ -197,33 +198,33 @@ class Ogr2Ifc:
                                                              self.building_storey)
 
     def body_representation(self, feature):
-        #Todo Point > ?, Line > ?
 
         geomref = feature.GetGeometryRef()  # Object
-        geomname = geomref.GetGeometryName()  # 'MULTIPOLYGON'...
-        print(geomname)
+        geomname = geomref.GetGeometryName()  # 'MULTIPOLYGON', 'COMPOUNDCURVE'...
+        geomcount = geomref.GetGeometryCount()
 
-        pointnr = geomref.GetPointCount()  # Number of points
-        print(pointnr)
+        if geomname != 'POLYGON':
+            raise Exception('Geom type %s not supported yet' % geomname)
 
-        for i in range(pointnr):
-            points = geomref.GetPoint(i)  # (x,y,z)
-            print(points)
-            x = geomref.GetX(i)  # also GetY, GetZ. Number
-        wktText = geomref.ExportToWkt()  # Other formats TI,C15,P81 teilgeomnr = geomref.GetGeomertyCount() # Nr Part Geo
-        print(wktText)
+        if geomcount != 1:
+            # The first ring is the outer ring, the following rings are inner rings (aka holes).
+            raise Exception('Geom count %s not supported yet' % geomcount)
+
+        outer_ring = geomref.GetGeometryRef(0)
+        point_list = [outer_ring.GetPoint(i) for i in range(outer_ring.GetPointCount())]
+
+        #print(geomref.ExportToWkt())
 
         extrusion_placement = create_ifcaxis2placement(self.ifcfile, (0.0, 0.0, 0.0), Z, X)
-        point_list_extrusion_area = [(0.0, -0.1, 0.0), (5.0, -0.1, 0.0), (5.0, 0.1, 0.0), (0.0, 0.1, 0.0),
-                                     (0.0, -0.1, 0.0)]
+        point_list_extrusion_area = point_list
 
         solid = create_ifcextrudedareasolid(self.ifcfile, point_list_extrusion_area, extrusion_placement, Z,
                                             self.extrusion_distance)
         return self.ifcfile.createIfcShapeRepresentation(self.context, "Body", "SweptSolid", [solid])
 
     def area(self, feature):
-        return  #ToDO
         # "Convert" Geometry to shapely-geometry
-        wkt_geometry = feature.GetGeometryRef().ExportToWkt()
-        shapely_geometry = shapely.wkt.loads(wkt_geometry)
-        return shapely_geometry.area
+        #wkt_geometry = feature.GetGeometryRef().ExportToWkt()
+        #shapely_geometry = wkt.loads(wkt_geometry)
+        #return shapely_geometry.area
+        pass
