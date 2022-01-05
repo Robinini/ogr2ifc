@@ -1,8 +1,24 @@
 # ogr2ifc
-GIS to BIM conversion using GDAL/OGR and IfcOpenShell-python
+GIS to BIM conversion using GDAL/OGR and IfcOpenShell-python.
+
+Allows the import of GIS data into a BIM Project.
+
+X, Y values from Easting and Nothing values in GIS data.
+Upper and lower extrusion boundaries (Z) either fixed or from GIS data attributes.
+
+Proof of concept (previously converted to DWG then manually modified in Revit).
+
+*Warning*: This is my first experience with IFC/BIM and is a learning project and should be treated as such
 
 # Status
-Proof of concept polygon working...
+* Polygon implemented (swept solid extrusion)
+  * Inner holes supported
+  * Multipolygons supported
+  * Curves not supported
+* Attributes added as property set
+  
+* Points, lines not yet supported
+* relate to IfcSpace, not IfcBuilding (currently)
 
 #GIS
 ![GIS File Source](GIS_file.png?raw=true)

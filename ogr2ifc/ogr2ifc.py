@@ -8,18 +8,33 @@ import shapely
 import ifcopenshell
 from ifcopenshell.template import TEMPLATE, create, DEFAULTS
 
+# ToDO: Curve geometry
+# ToDO: Space instead of building
+# ToDO: Attributes
+# ToDo: Make OO provide ability to do individual layers and objects
+# ToDo: Command line version with arguments
 
 ####################################################################################
 # IFC
+####################################################################################
 
-O = 0., 0., 0.
+####################################################################################
+# Generate guid
+create_guid = lambda: ifcopenshell.guid.compress(uuid.uuid1().hex)
+
+####################################################################################
+# Standard Vertices and Vectors
+null = 0., 0., 0.
 X = 1., 0., 0.
 Y = 0., 1., 0.
 Z = 0., 0., 1.
 
-#Helper functions
+####################################################################################
+# Placement
+
+
 # Creates an IfcAxis2Placement3D from Location, Axis and RefDirection specified as Python tuples
-def create_ifcaxis2placement(ifcfile, point=O, dir1=Z, dir2=X):
+def create_ifcaxis2placement(ifcfile, point=null, dir1=Z, dir2=X):
     point = ifcfile.createIfcCartesianPoint(point)
     dir1 = ifcfile.createIfcDirection(dir1)
     dir2 = ifcfile.createIfcDirection(dir2)
@@ -28,41 +43,80 @@ def create_ifcaxis2placement(ifcfile, point=O, dir1=Z, dir2=X):
 
 
 # Creates an IfcLocalPlacement from Location, Axis and RefDirection, specified as Python tuples, and relative placement
-def create_ifclocalplacement(ifcfile, point=O, dir1=Z, dir2=X, relative_to=None):
-    axis2placement = create_ifcaxis2placement(ifcfile,point,dir1,dir2)
-    ifclocalplacement2 = ifcfile.createIfcLocalPlacement(relative_to,axis2placement)
+def create_ifclocalplacement(ifcfile, point=null, dir1=Z, dir2=X, relative_to=None):
+    axis2placement = create_ifcaxis2placement(ifcfile, point, dir1, dir2)
+    ifclocalplacement2 = ifcfile.createIfcLocalPlacement(relative_to, axis2placement)
     return ifclocalplacement2
 
 
+####################################################################################
+# Geometry
+
+def create_ifcpoint(ifcfile, point, dimensions=2):
+    return ifcfile.createIfcCartesianPoint(point[:dimensions])
+
 # Creates an IfcPolyLine from a list of points, specified as Python tuples
 def create_ifcpolyline(ifcfile, point_list):
-    ifcpts = []
-    for point in point_list:
-        point = ifcfile.createIfcCartesianPoint(point)
-        ifcpts.append(point)
+    ifcpts = [create_ifcpoint(ifcfile, point) for point in point_list]
     polyline = ifcfile.createIfcPolyLine(ifcpts)
     return polyline
 
 
-# Creates an IfcExtrudedAreaSolid from a list of points, specified as Python tuples
-def create_ifcextrudedareasolid(ifcfile, point_list, ifcaxis2placement, extrude_dir, extrusion):
-    polyline = create_ifcpolyline(ifcfile, point_list)
-    ifcclosedprofile = ifcfile.createIfcArbitraryClosedProfileDef("AREA", None, polyline)
+# Supports multigeometry. Returns list of extruded solids (if single geometry, list of length one)
+def create_ifcextrudedareasolids(ifcfile, feature, ifcaxis2placement, extrude_dir, extrusion):
+    geomref = feature.GetGeometryRef()  # Object
+    return [create_ifcextrudedareasolid(ifcfile, geomref.GetGeometryRef(i), ifcaxis2placement, extrude_dir, extrusion)
+            for i in range(geomref.GetGeometryCount())]
+
+
+# Creates an createIfcArbitraryClosedProfileDef or IfcArbitraryProfileDefWithVoids from an ogc feature
+def create_ifcextrudedareasolid(ifcfile, geomref, ifcaxis2placement, extrude_dir, extrusion):
+    geomcount = geomref.GetGeometryCount()
+
+    # Outer ring
+    outer_ring = geomref.GetGeometryRef(0)
+    point_list = [outer_ring.GetPoint(i) for i in range(outer_ring.GetPointCount())]
+    outer_polyline = create_ifcpolyline(ifcfile, point_list)
+
+    # Create profile
+    if geomcount == 1:  # Simple profile
+        ifc_profile = ifcfile.createIfcArbitraryClosedProfileDef("AREA", None, outer_polyline)
+    else:  # Has inner voids/holes
+        # Inner bounds
+        inner_polylines = []
+        for j in range(1, geomcount):
+            inner_ring = geomref.GetGeometryRef(j)
+            point_list = [inner_ring.GetPoint(i) for i in range(inner_ring.GetPointCount())]
+            inner_polylines.append(create_ifcpolyline(ifcfile, point_list))
+
+        # IfcArbitraryProfileDefWithVoids
+        ifc_profile = ifcfile.createIfcArbitraryProfileDefWithVoids("AREA", None, outer_polyline, inner_polylines)
+
+    # Extrude profile to solid
     ifcdir = ifcfile.createIfcDirection(extrude_dir)
-    ifcextrudedareasolid = ifcfile.createIfcExtrudedAreaSolid(ifcclosedprofile, ifcaxis2placement, ifcdir, extrusion)
+    ifcextrudedareasolid = ifcfile.createIfcExtrudedAreaSolid(ifc_profile, ifcaxis2placement, ifcdir, extrusion)
     return ifcextrudedareasolid
 
 
-create_guid = lambda: ifcopenshell.guid.compress(uuid.uuid1().hex)
-
+####################################################################################
+# Class
 
 class Ogr2Ifc:
-    def __init__(self, gis_file_path, bim_file_path,
-                 bottom_elevation=0, top_elevation=10000):
+    def __init__(self, gis_file_path, bim_file_path, top_elevation=10000, bottom_elevation=0):
+        """
 
-        self.bottom_elevation = bottom_elevation
-        self.top_elevation = top_elevation
-        self.extrusion_distance = self.top_elevation - self.bottom_elevation
+        :param gis_file_path: Path to ogr supported vector GIS file
+        :param bim_file_path: Path to save IFC file
+        :param top_elevation: Upper elevation of extruded volume. If text, GIS attribute value will be used,
+        or self.max_elevation if NULL or not available
+        :param bottom_elevation: Lower elevation of extruded volume. If text, GIS attribute value will be used,
+        or self.min_elevation if NULL or not available
+        """
+
+        self.max_elevation = 10000  # default maximum extruded elevation
+        self.min_elevation = 0  # default minimum extruded elevation
+        self.top_elevation = top_elevation if top_elevation is not None else self.max_elevation
+        self.bottom_elevation = bottom_elevation if bottom_elevation is not None else self.min_elevation
 
         ############################################
         # IFC template creation
@@ -101,7 +155,7 @@ class Ogr2Ifc:
         self.storey_placement = create_ifclocalplacement(self.ifcfile, relative_to=self.building_placement)
         self.building_storey = self.ifcfile.createIfcBuildingStorey(create_guid(), self.owner_history,
                                                                     'Storey', None, None, self.storey_placement,
-                                                                    None, None, "ELEMENT", bottom_elevation)
+                                                                    None, None, "ELEMENT", 0)
 
         self.container_storey = self.ifcfile.createIfcRelAggregates(create_guid(), self.owner_history,
                                                                     "Building Container", None, self.building,
@@ -125,72 +179,85 @@ class Ogr2Ifc:
 
     def add_vector_layers(self):
         for layer in self.dataSource:
-            # Add layer propertysets
-            self.add_layer_property_set(layer)
-
             # Add features
             self.add_layer_objects(layer)
 
-    def add_layer_property_set(self, layer):
-        # ToDo
-        return
+    def add_layer_property_set(self, layer, feature, ifc_element):
         layername = layer.GetName()
+
+        """
         layerDefinition = layer.GetLayerDefn()
 
         for i in range(layerDefinition.GetFieldCount()):
-            field = layerDefinition.GetFieldDefn(i)  # Name and Type fieldName = field.GetName()
+            field = layerDefinition.GetFieldDefn(i)  # Name and Type
+            fieldName = field.GetName()
             fieldTypeCode = field.GetType()
             fieldType = field.GetFieldTypeName(fieldTypeCode)
             fieldWidth = field.GetWidth()
             field_precision = field.GetPrecision()
+        """
+
+        # Create and assign property set
+        attributes = feature.items()
+        property_values = list()
+
+        for k, v in attributes.items():  # toDo: Dates etc...
+            if isinstance(v, bool):
+                property_values.append(
+                    self.ifcfile.createIfcPropertySingleValue(k, k, self.ifcfile.create_entity("IfcBoolean", v), None))
+            elif isinstance(v, int):
+                property_values.append(
+                    self.ifcfile.createIfcPropertySingleValue(k, k, self.ifcfile.create_entity("IntValue", v), None))
+            elif isinstance(v, float):
+                property_values.append(
+                    self.ifcfile.createIfcPropertySingleValue(k, k, self.ifcfile.create_entity("IfcReal", v), None))
+            else:
+                property_values.append(
+                    self.ifcfile.createIfcPropertySingleValue(k, k,
+                                                              self.ifcfile.create_entity("IfcText", str(v)), None))
+
+
+        property_set = self.ifcfile.createIfcPropertySet(create_guid(), self.owner_history,
+                                                         "Pset_GIS2BIM_%s" % layername, None, property_values)
+        self.ifcfile.createIfcRelDefinesByProperties(create_guid(), self.owner_history, None, None, [ifc_element],
+                                                     property_set)
 
     def add_layer_objects(self, layer):
         layername = layer.GetName()
 
-        for feature in layer:
-            self.add_feature(layername, feature)
+        # Add parent space
+        space = self.ifcfile.createIfcSpace(create_guid(), self.owner_history, layername)
 
-    def add_feature(self, layername, feature):
+        for feature in layer:
+            self.add_feature(layer, space, feature)
+
+    def add_feature(self, layer, space, feature):
 
         ############################################
         # Wall creation: Define the ifc_element shape as a polyline axis and an extruded area solid
+        layername = layer.GetName()
+
         feature_placement = create_ifclocalplacement(self.ifcfile, relative_to=self.storey_placement)
 
         product_shape = self.ifcfile.createIfcProductDefinitionShape(None, None, [self.body_representation(feature)])
 
-        ifc_element = self.ifcfile.createIfcWallStandardCase(create_guid(), self.owner_history, "GIS Feature",
-                                                             "An GIS2BIM ifc_element",
+        ifc_element = self.ifcfile.createIfcWallStandardCase(create_guid(), self.owner_history,
+                                                             'GIS2BIM Layer %s, Feature ID %s' % (layername,
+                                                                                               feature.GetFID()),
+                                                             "A GIS2BIM ifc_element",
                                                              None, feature_placement, product_shape, None)
 
-        # Create and assign property set
-        property_values = list()
-        property_values.append(self.ifcfile.createIfcPropertySingleValue("Reference", "Reference",
-                                                                         self.ifcfile.create_entity("IfcText",
-                                                                                                    "GIS feature"),
-                                                                         None))
-        property_values.append(self.ifcfile.createIfcPropertySingleValue("IsExternal", "IsExternal",
-                                                                         self.ifcfile.create_entity("IfcBoolean", True),
-                                                                         None))
-        property_values.append(self.ifcfile.createIfcPropertySingleValue("ThermalTransmittance", "ThermalTransmittance",
-                                                                         self.ifcfile.create_entity("IfcReal", 2.569),
-                                                                         None))
-        property_values.append(self.ifcfile.createIfcPropertySingleValue("IntValue", "IntValue",
-                                                                         self.ifcfile.create_entity("IfcInteger", 2),
-                                                                         None))
-
-        property_set = self.ifcfile.createIfcPropertySet(create_guid(), self.owner_history,
-                                                         "Pset_WallCommon", None, property_values)
-        self.ifcfile.createIfcRelDefinesByProperties(create_guid(), self.owner_history, None, None, [ifc_element],
-                                                     property_set)
+        # Add property information
+        self.add_layer_property_set(layer, feature, ifc_element)
 
         # Add quantity information
-        """
-        quantity_values = [self.ifcfile.createIfcQuantityArea("Area", "Area of the front face", None, self.area(feature))]
+        geomref = feature.GetGeometryRef()
+        quantity_values = [self.ifcfile.createIfcQuantityArea("Area", "Area of the GIS feature", None, geomref.Area())]
         element_quantity = self.ifcfile.createIfcElementQuantity(create_guid(), self.owner_history, "BaseQuantities",
                                                                  None, None, quantity_values)
         self.ifcfile.createIfcRelDefinesByProperties(create_guid(), self.owner_history, None, None, [ifc_element],
                                                      element_quantity)
-        """
+
 
         # Relate the ifc_element to the building storey
         self.ifcfile.createIfcRelContainedInSpatialStructure(create_guid(), self.owner_history,
@@ -200,31 +267,36 @@ class Ogr2Ifc:
     def body_representation(self, feature):
 
         geomref = feature.GetGeometryRef()  # Object
-        geomname = geomref.GetGeometryName()  # 'MULTIPOLYGON', 'COMPOUNDCURVE'...
-        geomcount = geomref.GetGeometryCount()
+        geomname = geomref.GetGeometryName().upper()  # 'MULTIPOLYGON', 'COMPOUNDCURVE'...
 
-        if geomname != 'POLYGON':
+        if geomname in ('POLYGON', 'MULTIPOLYGON'):
+            return self.swept_solid(feature)
+        else:
+            """ Point, Multipoint,  Line, Multiline,  *Curve,  Geometry collection """
             raise Exception('Geom type %s not supported yet' % geomname)
 
-        if geomcount != 1:
-            # The first ring is the outer ring, the following rings are inner rings (aka holes).
-            raise Exception('Geom count %s not supported yet' % geomcount)
+    def swept_solid(self, feature):
+        # Obtain extrusion information if attribute information
+        if isinstance(self.bottom_elevation, str):
+            bottom_elevation = feature.items().get(self.bottom_elevation)
+            if bottom_elevation is None:
+                print('Bottom elevation for feature %s set to min' % feature.GetFID())
+                bottom_elevation = self.min_elevation
+        else:
+            bottom_elevation = self.bottom_elevation
 
-        outer_ring = geomref.GetGeometryRef(0)
-        point_list = [outer_ring.GetPoint(i) for i in range(outer_ring.GetPointCount())]
+        if isinstance(self.top_elevation, str):
+            top_elevation = feature.items().get(self.top_elevation)
+            if top_elevation is None:
+                print('Top elevation for feature %s set to max' % feature.GetFID())
+                top_elevation = self.max_elevation
+        else:
+            top_elevation = self.top_elevation
 
-        #print(geomref.ExportToWkt())
+        extrusion_distance = top_elevation - bottom_elevation
 
-        extrusion_placement = create_ifcaxis2placement(self.ifcfile, (0.0, 0.0, 0.0), Z, X)
-        point_list_extrusion_area = point_list
+        extrusion_placement = create_ifcaxis2placement(self.ifcfile, (0.0, 0.0, float(bottom_elevation)), Z, X)
 
-        solid = create_ifcextrudedareasolid(self.ifcfile, point_list_extrusion_area, extrusion_placement, Z,
-                                            self.extrusion_distance)
-        return self.ifcfile.createIfcShapeRepresentation(self.context, "Body", "SweptSolid", [solid])
+        solids = create_ifcextrudedareasolids(self.ifcfile, feature, extrusion_placement, Z, extrusion_distance)
+        return self.ifcfile.createIfcShapeRepresentation(self.context, "Body", "SweptSolid", solids)
 
-    def area(self, feature):
-        # "Convert" Geometry to shapely-geometry
-        #wkt_geometry = feature.GetGeometryRef().ExportToWkt()
-        #shapely_geometry = wkt.loads(wkt_geometry)
-        #return shapely_geometry.area
-        pass
