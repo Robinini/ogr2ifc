@@ -15,7 +15,9 @@ See `python ogr2ifc.py -h` for command line useage.
 
 Example use in python scripts:
 ```python
-Ogr2Ifc('gis_files/complex.gpkg', file_path, bottom_elevation='bottom', top_elevation='top')
+o2i = Ogr2Ifc('gis_files/complex.gpkg', bottom_elevation='bottom', top_elevation='top')
+o2i.add_vector_layers('complex multipolies')
+o2i.save_ifc('test.ifc')
 ```
 
 # Status
@@ -28,7 +30,7 @@ Ogr2Ifc('gis_files/complex.gpkg', file_path, bottom_elevation='bottom', top_elev
 * Points, lines not yet supported
 * relate to IfcSpace, not IfcBuilding (currently)
 
-# GIS
+### GIS
 ![GIS File Source](GIS_file.png?raw=true)
-# BIM
+### BIM
 ![IFC File](example_ifc.png?raw=true)

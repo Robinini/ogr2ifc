@@ -6,7 +6,6 @@ Script and classes to convert an ogc supported vector format file to an IFC file
 
 import os
 import argparse
-import uuid
 import time
 import logging
 import ogr
@@ -16,20 +15,24 @@ from ifcopenshell.template import TEMPLATE, create, DEFAULTS
 # ToDO: Curve geometry
 # ToDO: Line/Point geometry
 # ToDo: Solid support of recursive geometry types
-# ToDO: Space instead of building
-# ToDO: Attributes - ok?
-# ToDo: Make OO provide ability to do individual layers and objects
-# ToDo: Command line version with arguments
+"""
 
-# Idea for 3D data - if top_elevation but not bottom, use 3D as bottom (and reverse for bottom_elevation)
+Point, Multipoint,  Line, Multiline, 
+ Polygon ring, Polygon, Multipolygon, Geometry collection
+ Compound* *Curve, 'COMPOUNDCURVE'...
 
-####################################################################################
-# IFC
-####################################################################################
+"""
+
+# ToDO: Spaces instead of building (layer space composed of feature spaces aggregated)
+
+# ToDo: Support 3D data - if top_elevation but not bottom, use 3D as bottom (and reverse for bottom_elevation)
+# https://standards.buildingsmart.org/IFC/DEV/IFC4_3/RC1/HTML/schema/ifcrepresentationresource/lexical/ifcshaperepresentation.htm
+
+# ToDo Comments/Documentation
 
 ####################################################################################
 # Generate guid
-create_guid = lambda: ifcopenshell.guid.compress(uuid.uuid1().hex)
+create_guid = ifcopenshell.guid.new
 
 ####################################################################################
 # Standard Vertices and Vectors
@@ -38,9 +41,9 @@ X = 1., 0., 0.
 Y = 0., 1., 0.
 Z = 0., 0., 1.
 
+
 ####################################################################################
 # Placement
-
 
 # Creates an IfcAxis2Placement3D from Location, Axis and RefDirection specified as Python tuples
 def create_ifcaxis2placement(ifcfile, point=null, dir1=Z, dir2=X):
@@ -62,19 +65,17 @@ def create_ifclocalplacement(ifcfile, point=null, dir1=Z, dir2=X, relative_to=No
 # Classes
 
 class Ogr2Ifc:
-    def __init__(self, gis_file_path, bim_file_path, top_elevation=10000.0, bottom_elevation=0.0):
+    def __init__(self, gis_file_path, top_elevation=10000.0, bottom_elevation=0.0):
         """
 
         :param gis_file_path: Path to ogr supported vector GIS file
-        :param bim_file_path: Path to save IFC file
         :param top_elevation: Upper elevation of extruded volume. If text, GIS attribute value will be used,
         or self.max_elevation if NULL or not available
         :param bottom_elevation: Lower elevation of extruded volume. If text, GIS attribute value will be used,
         or self.min_elevation if NULL or not available
         """
 
-        # Shape representations, typically *increasing th dimensionality of the features
-        # https://standards.buildingsmart.org/IFC/DEV/IFC4_3/RC1/HTML/schema/ifcrepresentationresource/lexical/ifcshaperepresentation.htm
+        # Shape representations to create
         self.CoG = False
         self.Box = False
         self.Axis = False
@@ -82,15 +83,23 @@ class Ogr2Ifc:
         self.Surface = True
         self.Body = True
 
-        self.max_elevation = 10000.0  # default maximum extruded elevation
-        self.min_elevation = 0.0  # default minimum extruded elevation
-        self.top_elevation = top_elevation if top_elevation is not None else self.max_elevation
-        self.bottom_elevation = bottom_elevation if bottom_elevation is not None else self.min_elevation
+        self.top_elevation = top_elevation if top_elevation is not None else 10000.0  # default maximum
+        self.bottom_elevation = bottom_elevation if bottom_elevation is not None else 0.0  # default min
+
+        self.dataSource = self.load_gis_file(gis_file_path)
+        self.ifcfile = self.create_ifc()
+
+    def load_gis_file(self, gis_file_path):
+        if not os.path.isfile(gis_file_path):
+            raise FileNotFoundError(f'File {gis_file_path} not found')
+        return ogr.Open(gis_file_path)
+
+    def create_ifc(self):
 
         ############################################
         # IFC template creation
         settings = DEFAULTS
-        settings['filename'] = os.path.basename(bim_file_path)
+        #settings['filename'] = os.path.basename(self.bim_file_path)
         settings['timestamp'] = time.time()
         settings['timestring'] = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time()))
         settings['creator'] = "Robin Dainton"
@@ -102,62 +111,57 @@ class Ogr2Ifc:
         settings['project_name'] = "GIS2BIM"
 
         # Create new file from template
-        self.ifcfile = create(**settings)
+        ifcfile = create(**settings)
 
         # Obtain references to instances defined in template, for use in construction
-        self.owner_history = self.ifcfile.by_type("IfcOwnerHistory")[0]
-        self.project = self.ifcfile.by_type("IfcProject")[0]
-        self.context = self.ifcfile.by_type("IfcGeometricRepresentationContext")[0]
+        self.owner_history = ifcfile.by_type("IfcOwnerHistory")[0]
+        self.project = ifcfile.by_type("IfcProject")[0]
+        self.context = ifcfile.by_type("IfcGeometricRepresentationContext")[0]
 
         ############################################
         # IFC hierarchy creation
-        self.site_placement = create_ifclocalplacement(self.ifcfile)
-        self.site = self.ifcfile.createIfcSite(create_guid(), self.owner_history, "Site", None, None,
+        self.site_placement = create_ifclocalplacement(ifcfile)
+        self.site = ifcfile.createIfcSite(create_guid(), self.owner_history, "Site", None, None,
                                                self.site_placement, None, None, "ELEMENT",
                                                None, None, None, None, None)
 
-        self.building_placement = create_ifclocalplacement(self.ifcfile, relative_to=self.site_placement)
-        self.building = self.ifcfile.createIfcBuilding(create_guid(), self.owner_history, 'Building',
+        self.building_placement = create_ifclocalplacement(ifcfile, relative_to=self.site_placement)
+        self.building = ifcfile.createIfcBuilding(create_guid(), self.owner_history, 'Building',
                                                        None, None, self.building_placement, None, None,
                                                        "ELEMENT", None, None, None)
 
-        self.storey_placement = create_ifclocalplacement(self.ifcfile, relative_to=self.building_placement)
-        self.building_storey = self.ifcfile.createIfcBuildingStorey(create_guid(), self.owner_history,
+        self.storey_placement = create_ifclocalplacement(ifcfile, relative_to=self.building_placement)
+        self.building_storey = ifcfile.createIfcBuildingStorey(create_guid(), self.owner_history,
                                                                     'Storey', None, None, self.storey_placement,
                                                                     None, None, "ELEMENT", 0)
 
-        self.container_storey = self.ifcfile.createIfcRelAggregates(create_guid(), self.owner_history,
+        self.container_storey = ifcfile.createIfcRelAggregates(create_guid(), self.owner_history,
                                                                     "Building Container", None, self.building,
                                                                     [self.building_storey])
-        self.container_site = self.ifcfile.createIfcRelAggregates(create_guid(), self.owner_history, "Site Container",
+        self.container_site = ifcfile.createIfcRelAggregates(create_guid(), self.owner_history, "Site Container",
                                                                   None, self.site, [self.building])
-        self.container_project = self.ifcfile.createIfcRelAggregates(create_guid(), self.owner_history,
+        self.container_project = ifcfile.createIfcRelAggregates(create_guid(), self.owner_history,
                                                                      "Project Container", None, self.project,
                                                                      [self.site])
+        return ifcfile
 
-        # Add GIS data
-        if not os.path.isfile(gis_file_path):
-            raise FileNotFoundError(f'File {gis_file_path} not found')
-        self.dataSource = ogr.Open(gis_file_path)
-        self.add_vector_layers()
-
+    def save_ifc(self, bim_file_path=None):
         # Save ifc file
         os.makedirs(os.path.dirname(bim_file_path), exist_ok=True)
         self.ifcfile.write(bim_file_path)
         print(f'IFC file written to {bim_file_path}')
 
-    def __del__(self):
-        try:
-            self.dataSource.Destroy()
-        except AttributeError:
-            pass
+    def add_vector_layers(self, layernames=None):
 
-    def add_vector_layers(self):
+        if isinstance(layernames, str):
+            layernames = [layernames]
+
         for layer in self.dataSource:
-            # Add features
-            self.add_layer_objects(layer)
+            if layernames is None or layer.GetName() in layernames:
+                # Add features
+                self.add_layer_objects(layer)
 
-    def add_layer_property_set(self, layer, feature, ifc_element):
+    def add_property_set(self, layer, feature, ifc_element):
         layername = layer.GetName()
 
         # Create and assign property set
@@ -213,7 +217,7 @@ class Ogr2Ifc:
                                                              None, feature_placement, product_shape, None)
 
         # Add property information
-        self.add_layer_property_set(layer, feature, ifc_element)
+        self.add_property_set(layer, feature, ifc_element)
 
         # Add quantity information
         geomref = feature.GetGeometryRef()
@@ -229,16 +233,6 @@ class Ogr2Ifc:
                                                              "Building Storey Container", None, [ifc_element],
                                                              self.building_storey)
 
-
-
-
-"""
-
-Point, Multipoint,  Line, Multiline, 
- Polygon ring, Polygon, Multipolygon, Geometry collection
- Compound* *Curve, 'COMPOUNDCURVE'...
-
-"""
 
 class Ogr2Shape:
     def __init__(self, ogr2ifc, feature):
@@ -415,19 +409,22 @@ class Ogr2Shape:
         ifcextrudedareasolid = self.ogr2ifc.ifcfile.createIfcExtrudedAreaSolid(ifc_profile, ifcaxis2placement, ifcdir, extrusion)
         return ifcextrudedareasolid
 
+
 if __name__ == '__main__':
+
+    # Command line operation
 
     parser = argparse.ArgumentParser(description='Convert an ogc supported vector format file to an IFC file')
     parser.add_argument('dst_ifc_file', help='destination IFC file to be created')
 
     parser.add_argument('-top', help='Upper elevation for extruded IFC shape representations. '
-                                                 'If text, GIS attribute value will be used')
+                                     'If text, GIS attribute value will be used')
     parser.add_argument('-bottom', help='Lower elevation for extruded IFC shape representations. '
-                                                    'If text, GIS attribute value will be used')
+                                        'If text, GIS attribute value will be used')
 
     parser.add_argument('src_gis_file', help='source GIS vector file to be converted')
-    parser.add_argument('layer', metavar='layername', nargs='?', help='layers to be converted, '
-                                                                      'default: all layers will be converted')
+    parser.add_argument('layername', nargs='?', help='layername to be converted. '
+                                                     'If not provided, all layers will be converted')
 
     # Get user arguments
     args = parser.parse_args()
@@ -436,11 +433,13 @@ if __name__ == '__main__':
     try:
         args.top = float(args.top)
     except:
-        pass
+        pass  # Assume this is an attribute name
     try:
         args.bottom = float(args.bottom)
     except:
-        pass
+        pass  # Assume this is an attribute name
 
-    o2i = Ogr2Ifc(gis_file_path=args.src_gis_file, bim_file_path=args.dst_ifc_file,
-                  top_elevation=args.top, bottom_elevation=args.bottom)
+    o2i = Ogr2Ifc(gis_file_path=args.src_gis_file, top_elevation=args.top, bottom_elevation=args.bottom)
+
+    o2i.add_vector_layers(args.layername)
+    o2i.save_ifc(args.dst_ifc_file)
