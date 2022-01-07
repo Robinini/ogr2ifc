@@ -8,7 +8,15 @@ Upper and lower extrusion boundaries (Z) either fixed or from GIS data attribute
 
 Proof of concept (previously converted to DWG then manually modified in Revit).
 
-*Warning*: This is my first experience with IFC/BIM and is a learning project and should be treated as such
+*Warning*: In developement. This is my first experience with IFC/BIM and is a learning project and should be treated as such
+
+# Useage
+See `python ogr2ifc.py -h` for command line useage.
+
+Example use in python scripts:
+```python
+Ogr2Ifc('gis_files/complex.gpkg', file_path, bottom_elevation='bottom', top_elevation='top')
+```
 
 # Status
 * Polygon implemented (swept solid extrusion)
@@ -20,7 +28,7 @@ Proof of concept (previously converted to DWG then manually modified in Revit).
 * Points, lines not yet supported
 * relate to IfcSpace, not IfcBuilding (currently)
 
-#GIS
+# GIS
 ![GIS File Source](GIS_file.png?raw=true)
-#BIM
+# BIM
 ![IFC File](example_ifc.png?raw=true)
