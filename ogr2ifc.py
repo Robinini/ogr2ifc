@@ -185,7 +185,7 @@ class Ogr2Ifc:
                                                               self.ifcfile.create_entity("IfcText", str(v)), None))
 
         property_set = self.ifcfile.createIfcPropertySet(create_guid(), self.owner_history,
-                                                         "Pset_GIS2BIM_%s" % layername, None, property_values)
+                                                         "ePset_GIS2BIM_%s" % layername, None, property_values)
         self.ifcfile.createIfcRelDefinesByProperties(create_guid(), self.owner_history, None, None, [ifc_element],
                                                      property_set)
 
