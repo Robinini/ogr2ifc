@@ -6,18 +6,18 @@ This allows the import or visualisation of GIS data in a BIM project.
 
 All GIS [vector data formats supported by GDAL/OGR](https://gdal.org/drivers/vector/index.html) can be converted.
 
-GIS features are converted to `IfcProduct`/`IfcWall` elements. 
+GIS features are converted to *IfcProduct*/*IfcWall* elements. 
 GIS attributes are also added to the IFC element as custom property sets.
 
 GIS geometries can be converted to multiple 
-[IfcShapeRepresentations](https://standards.buildingsmart.org/IFC/DEV/IFC4_3/RC1/HTML/schema/ifcrepresentationresource/lexical/ifcshaperepresentation.htm).
+[*IfcShapeRepresentations*](https://standards.buildingsmart.org/IFC/DEV/IFC4_3/RC1/HTML/schema/ifcrepresentationresource/lexical/ifcshaperepresentation.htm).
 
 Coordinates can be transformed to match the BIM project coordinate system using simple transformation and rotation, or a 
 custom coordinate transformation can be applied by passing a transformation function.
 
 Depending on the representation geometry created, GIS geometries are extruded vertically to produce lines, surfaces or volumes.
 Extrusion boundaries can be defined using fixed elevations, or using attribute values from each GIS feature 
-(eg: `floor-slab_elevation` and `roof_apex`) data attributes.
+(eg: `'floor-slab_elevation'` and `'roof_apex'`) data attributes.
 
 # Development Status
 This tool is currently in development.
@@ -33,8 +33,8 @@ This tool is currently in development.
 * Points, lines, footprints
 * Curved geometry
 * Surfaces
-* Create features as part of `IfcSpace` instead of `IfcBuilding`
-* use of IFC4 `HasCoordinateOperation`/`IfcMapConversion` as alternative to transformation
+* Create features as part of *IfcSpace* instead of *IfcBuilding*
+* use of IFC4 *HasCoordinateOperation*/*IfcMapConversion* as alternative to transformation
 
 # Installation
 Dependencies:
@@ -65,15 +65,14 @@ o2i.save_ifc('test.ifc')
 ```
 
 # Geometry Representations
-Multiple [IfcShapeRepresentations](https://standards.buildingsmart.org/IFC/DEV/IFC4_3/RC1/HTML/schema/ifcrepresentationresource/lexical/ifcshaperepresentation.htm).
- can be created for each feature.
+Multiple [IfcShapeRepresentations](https://standards.buildingsmart.org/IFC/DEV/IFC4_3/RC1/HTML/schema/ifcrepresentationresource/lexical/ifcshaperepresentation.htm)
+ can be created for each feature, as shown in the table below.
 
-Prior to conversion, the Ogr2Ifc instance attributes below can be modified to 
-create the desired representations:
+
 
 <table>
   <tr>
-    <th rowspan="2">Ogr2Ifc Attribute / IFC Identifier</th>
+    <th rowspan="2"><code>Ogr2Ifc</code> Attribute / IFC Identifier</th>
     <th rowspan="2">Description</th>
     <th colspan="4">Implemented for <a href="https://gdal.org/doxygen/classOGRGeometry.html">OGRGeometry Class</a></th>
   </tr>
@@ -116,12 +115,14 @@ create the desired representations:
   </tr>
 </table>
 
+If an *IfcShapeRepresentation* is not desired, this can be prevented
+by setting the relevant `Ogr2Ifc` attribute to `False` prior to conversion.
 
 For example:
 
 ```python
 o2i = Ogr2Ifc('gis_files/complex.gpkg')
-o2i.Box = True
+o2i.Box = False
 ...
 ```
 
