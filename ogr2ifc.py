@@ -10,11 +10,15 @@ import time
 import logging
 import ogr
 import ifcopenshell
+from shapely.affinity import translate, rotate
+from shapely.geometry import Point
 from ifcopenshell.template import TEMPLATE, create, DEFAULTS
 
 # ToDO: Curve geometry
 # ToDO: Line/Point geometry
 # ToDo: Solid support of recursive geometry types
+
+# ToDo: Directory convert version
 """
 
 Point, Multipoint,  Line, Multiline, 
@@ -29,6 +33,32 @@ Point, Multipoint,  Line, Multiline,
 # https://standards.buildingsmart.org/IFC/DEV/IFC4_3/RC1/HTML/schema/ifcrepresentationresource/lexical/ifcshaperepresentation.htm
 
 # ToDo Comments/Documentation
+
+
+####################################################################################
+# Coordinate Transformation function generators
+# Can be supplied to Ogr2Ifc as coord_transformer parameter.
+# Creates function to convert shapely geometry to IFC coordinate space
+# See https://shapely.readthedocs.io/en/stable/manual.html for other options
+
+def transformer(eastings=0.0, northings=0.0, orthogonal_height=0.0, rotation=0):
+    """
+
+    :param eastings: Specifies the location along the easting of the coordinate system of the
+    target map coordinate reference system.
+    :param northings: Specifies the location along the northing of the coordinate system of the
+    target map coordinate reference system.
+    :param orthogonal_height: Orthogonal height relative to the vertical datum specified
+    :param rotation: degrees (positive angles are counter-clockwise)
+    :return: function to convert shapely geometry to IFC coordinate space
+    """
+
+    def coord_transformer(geom):
+        geom = translate(geom, xoff=-eastings, yoff=-northings, zoff=-orthogonal_height)
+        return rotate(geom, angle=rotation, origin=(0, 0))
+
+    return coord_transformer
+
 
 ####################################################################################
 # Generate guid
@@ -65,7 +95,8 @@ def create_ifclocalplacement(ifcfile, point=null, dir1=Z, dir2=X, relative_to=No
 # Classes
 
 class Ogr2Ifc:
-    def __init__(self, gis_file_path, top_elevation=10000.0, bottom_elevation=0.0):
+    def __init__(self, gis_file_path=None, top_elevation=10000.0, bottom_elevation=0.0,
+                 coord_transformer=None, transform_elevations=True):
         """
 
         :param gis_file_path: Path to ogr supported vector GIS file
@@ -73,12 +104,14 @@ class Ogr2Ifc:
         or self.max_elevation if NULL or not available
         :param bottom_elevation: Lower elevation of extruded volume. If text, GIS attribute value will be used,
         or self.min_elevation if NULL or not available
+        :param coord_transformer: Function to convert shapely geometry to IFC coordinate space
+
         """
 
         # Shape representations to create
         self.CoG = False
         self.Box = False
-        self.Axis = False
+        self.Axis = True
         self.FootPrint = False
         self.Surface = True
         self.Body = True
@@ -86,13 +119,18 @@ class Ogr2Ifc:
         self.top_elevation = top_elevation if top_elevation is not None else 10000.0  # default maximum
         self.bottom_elevation = bottom_elevation if bottom_elevation is not None else 0.0  # default min
 
-        self.dataSource = self.load_gis_file(gis_file_path)
+        self.coord_transformer = coord_transformer if coord_transformer else transformer
         self.ifcfile = self.create_ifc()
+
+        self.dataSource = None
+        if gis_file_path:
+            self.load_gis_file(gis_file_path)
+
 
     def load_gis_file(self, gis_file_path):
         if not os.path.isfile(gis_file_path):
             raise FileNotFoundError(f'File {gis_file_path} not found')
-        return ogr.Open(gis_file_path)
+        self.dataSource = ogr.Open(gis_file_path)
 
     def create_ifc(self):
 
@@ -103,7 +141,7 @@ class Ogr2Ifc:
         settings['timestamp'] = time.time()
         settings['timestring'] = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time()))
         settings['creator'] = "Robin Dainton"
-        settings['organization'] = "HBT"
+        settings['organization'] = "Dainton Inc."
         settings['application'] = "IfcOpenShell"
         settings['application_version'] = "0.5"
         settings['schema_identifier'] = "IFC4"
@@ -125,25 +163,30 @@ class Ogr2Ifc:
                                                self.site_placement, None, None, "ELEMENT",
                                                None, None, None, None, None)
 
+
         self.building_placement = create_ifclocalplacement(ifcfile, relative_to=self.site_placement)
-        self.building = ifcfile.createIfcBuilding(create_guid(), self.owner_history, 'Building',
+        self.building = ifcfile.createIfcBuilding(create_guid(), self.owner_history, 'GIS2BIM',
                                                        None, None, self.building_placement, None, None,
                                                        "ELEMENT", None, None, None)
 
-        self.storey_placement = create_ifclocalplacement(ifcfile, relative_to=self.building_placement)
-        self.building_storey = ifcfile.createIfcBuildingStorey(create_guid(), self.owner_history,
-                                                                    'Storey', None, None, self.storey_placement,
-                                                                    None, None, "ELEMENT", 0)
-
-        self.container_storey = ifcfile.createIfcRelAggregates(create_guid(), self.owner_history,
-                                                                    "Building Container", None, self.building,
-                                                                    [self.building_storey])
         self.container_site = ifcfile.createIfcRelAggregates(create_guid(), self.owner_history, "Site Container",
                                                                   None, self.site, [self.building])
         self.container_project = ifcfile.createIfcRelAggregates(create_guid(), self.owner_history,
                                                                      "Project Container", None, self.project,
                                                                      [self.site])
+
         return ifcfile
+
+    def create_storey(self, name):
+        self.storey_placement = create_ifclocalplacement(self.ifcfile, relative_to=self.building_placement)
+        self.building_storey = self.ifcfile.createIfcBuildingStorey(create_guid(), self.owner_history,
+                                                               name, None, None, self.storey_placement,
+                                                               None, None, "ELEMENT", 0)
+
+        storey = self.ifcfile.createIfcRelAggregates(create_guid(), self.owner_history,
+                                                               "Building Container", None, self.building,
+                                                               [self.building_storey])
+        return storey
 
     def save_ifc(self, bim_file_path=None):
         # Save ifc file
@@ -174,7 +217,7 @@ class Ogr2Ifc:
                     self.ifcfile.createIfcPropertySingleValue(k, k, self.ifcfile.create_entity("IfcBoolean", v), None))
             elif isinstance(v, int):
                 property_values.append(
-                    self.ifcfile.createIfcPropertySingleValue(k, k, self.ifcfile.create_entity("IntValue", v), None))
+                    self.ifcfile.createIfcPropertySingleValue(k, k, self.ifcfile.create_entity("IfcInteger", v), None))
             elif isinstance(v, float):
                 property_values.append(
                     self.ifcfile.createIfcPropertySingleValue(k, k, self.ifcfile.create_entity("IfcReal", v), None))
@@ -193,7 +236,10 @@ class Ogr2Ifc:
         layername = layer.GetName()
 
         # Add parent space
-        space = self.ifcfile.createIfcSpace(create_guid(), self.owner_history, layername)
+        space = self.ifcfile.createIfcSpace(GlobalId=create_guid(), Description='GIS2 Bim Layer space', OwnerHistory=self.owner_history,
+                                            Name=layername, ObjectPlacement=self.site_placement)
+
+        space = self.create_storey(layer.GetName())
 
         for feature in layer:
             self.add_feature(layer, space, feature)
@@ -204,7 +250,7 @@ class Ogr2Ifc:
         # Wall creation: Define the ifc_element shape as a polyline axis and an extruded area solid
         layername = layer.GetName()
 
-        feature_placement = create_ifclocalplacement(self.ifcfile, relative_to=self.storey_placement)
+        feature_placement = create_ifclocalplacement(self.ifcfile)  #, relative_to=self.storey_placement)
 
         shape = Ogr2Shape(self, feature)
 
@@ -216,22 +262,32 @@ class Ogr2Ifc:
                                                              "A GIS2BIM ifc_element",
                                                              None, feature_placement, product_shape, None)
 
+        self.ifcfile.createIfcRelAggregates(create_guid(), self.owner_history,
+                                                         "Feature space", None, space,
+                                                         [ifc_element])
+
         # Add property information
         self.add_property_set(layer, feature, ifc_element)
 
         # Add quantity information
-        geomref = feature.GetGeometryRef()
-        quantity_values = [self.ifcfile.createIfcQuantityArea("Area", "Area of the GIS feature", None, geomref.Area())]
-        element_quantity = self.ifcfile.createIfcElementQuantity(create_guid(), self.owner_history, "BaseQuantities",
-                                                                 None, None, quantity_values)
-        self.ifcfile.createIfcRelDefinesByProperties(create_guid(), self.owner_history, None, None, [ifc_element],
-                                                     element_quantity)
+        feature_quantities = self.feature_quantities(feature)
+        if feature_quantities:
+            element_quantity = self.ifcfile.createIfcElementQuantity(create_guid(), self.owner_history, "BaseQuantities",
+                                                                     None, None, feature_quantities)
+            self.ifcfile.createIfcRelDefinesByProperties(create_guid(), self.owner_history, None, None, [ifc_element],
+                                                         element_quantity)
 
 
         # Relate the ifc_element to the building storey
         self.ifcfile.createIfcRelContainedInSpatialStructure(create_guid(), self.owner_history,
                                                              "Building Storey Container", None, [ifc_element],
                                                              self.building_storey)
+    def feature_quantities(self, feature):
+        geomref = feature.GetGeometryRef()
+        if geomref.GetGeometryName().upper() in ('POLYGON', 'MULTIPOLYGON'):
+            return [self.ifcfile.createIfcQuantityArea("Area", "Area of the GIS feature", None, geomref.Area())]
+        elif geomref.GetGeometryName().upper() in ('LINE', 'MULTILINE'):
+            return [self.ifcfile.createIfcQuantityArea("Length", "Length of the GIS feature", None, geomref.Length())]
 
 
 class Ogr2Shape:
@@ -240,7 +296,8 @@ class Ogr2Shape:
         self.feature = feature
 
     def geom_type(self, *types):
-        return self.feature.GetGeometryRef().GetGeometryName().upper() in list([type.upper() for type in types])
+        return self.feature.GetGeometryRef().GetGeometryName().upper() \
+               in list([type.upper() for type in types])
 
     def representations(self):
 
@@ -278,7 +335,10 @@ class Ogr2Shape:
         else:
             top_elevation = self.ogr2ifc.top_elevation
 
-        return float(top_elevation), float(bottom_elevation)
+        # Ensure that values are numerical
+        top_elevation, bottom_elevation = float(top_elevation), float(bottom_elevation)
+
+        return top_elevation, bottom_elevation
 
     def cog(self):
         raise NotImplementedError
@@ -287,7 +347,24 @@ class Ogr2Shape:
         raise NotImplementedError
 
     def axis(self):
-        raise NotImplementedError
+        # Todo - this is rough test
+        axes = list()
+
+        if not self.geom_type('Point', 'Multipoint'):
+            return []
+
+        top_elevation, bottom_elevation = self.extrusion_bounds()
+
+        geomref = self.feature.GetGeometryRef()  # Object
+
+        if geomref.GetGeometryCount() > 1:
+            raise('Multi points not supported')
+
+        point = geomref.GetPoint()
+        axes.append(self.create_ifcpolyline([(point[0], point[1], bottom_elevation),
+                                             (point[0], point[1], top_elevation)], dimensions=3))
+
+        return [self.ogr2ifc.ifcfile.createIfcShapeRepresentation(self.ogr2ifc.context, "Axis", "Curve2D", axes)]
 
     def footprint(self):
         raise NotImplementedError
@@ -323,13 +400,16 @@ class Ogr2Shape:
 
         top_elevation, bottom_elevation = self.extrusion_bounds()
         extrusion_distance = top_elevation - bottom_elevation
-        extrusion_placement = create_ifcaxis2placement(self.ogr2ifc.ifcfile, (0.0, 0.0, bottom_elevation), Z, X)
+
+        # Transform values
+        bottom_elevation_transformed = self.ogr2ifc.coord_transformer(Point(0, 0, bottom_elevation)).z
+        extrusion_placement = create_ifcaxis2placement(self.ogr2ifc.ifcfile, (0.0, 0.0, bottom_elevation_transformed), Z, X)
         solids = self.create_ifcextrudedareasolids(extrusion_placement, Z, extrusion_distance)
 
         return [self.ogr2ifc.ifcfile.createIfcShapeRepresentation(self.ogr2ifc.context, "Body", "SweptSolid", solids)]
 
     ####################################################################################
-    # Geometry
+    # IFC Geometry
     # https://standards.buildingsmart.org/IFC/DEV/IFC4_3/RC1/HTML/schema/ifcrepresentationresource/lexical/ifcshaperepresentation.htm
 
     # Point
@@ -337,6 +417,7 @@ class Ogr2Shape:
         return [self.create_ifcpoint(point, dimensions) for point in points]
 
     def create_ifcpoint(self, point, dimensions=2):
+        point = self.ogr2ifc.coord_transformer(Point(*point)).coords[0]
         return self.ogr2ifc.ifcfile.createIfcCartesianPoint(point[:dimensions])
 
     # Line
