@@ -33,8 +33,8 @@ This tool is currently in development.
 * Points, lines, footprints
 * Curved geometry
 * Surfaces
-* create features as part of IfcSpace instead of IfcBuilding
-* use of IFC4 `HasCoordinateOperation`/`IfcMapConversion` as alternative to trnsformation
+* Create features as part of `IfcSpace` instead of `IfcBuilding`
+* use of IFC4 `HasCoordinateOperation`/`IfcMapConversion` as alternative to transformation
 
 # Installation
 Dependencies:
@@ -142,12 +142,12 @@ o2i = Ogr2Ifc('gis_files/poly.shp', coord_transformer=coord_tran)
 ```
 
 Custom transformations can also be provided, for example
-any of the [shapely transformations](https://shapely.readthedocs.io/en/stable/manual.html#affine-transformations), including
+any [shapely transformation](https://shapely.readthedocs.io/en/stable/manual.html#affine-transformations), including
 [map reprojections](https://shapely.readthedocs.io/en/stable/manual.html#other-transformations).
 
 # Example Visualisation
 
-### GIS
+### GIS File
 ![GIS File Source](GIS_file.png?raw=true)
-### BIM
+### BIM IFC File
 ![IFC File](example_ifc.png?raw=true)
