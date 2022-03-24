@@ -15,19 +15,19 @@ GIS geometries can be converted to multiple
 Coordinates can be transformed to match the BIM project coordinate system using simple transformation and rotation, or a 
 custom coordinate transformation can be applied by passing a transformation function.
 
-Depending on the representation geometry created, GIS geometries are extruded vertically to produce lines, surfaces or volumes.
+Depending on the source and destination representation geometry types, GIS geometries are extruded vertically to produce lines, surfaces or volumes.
 Extrusion boundaries can be defined using fixed elevations, or using attribute values from each GIS feature 
 (eg: `'floor-slab_elevation'` and `'roof_apex'`) data attributes.
 
 # Development Status
-This tool is currently in development.
+This tool is currently in development, but is useable in it's current state.
 
 ### Implemented
 * Polygon implemented (swept solid extrusion)
   * Inner holes supported
   * Multipolygons supported
 * Attributes added as custom property set
-* Coordinate transformation
+* Coordinate transformation from GIS to BIM coordinate system
   
 ### Under Development
 * Points, lines, footprints
@@ -46,14 +46,14 @@ Dependencies:
 Copy file `ogr2ifc.py` to the script folder or to a folder on the python module search path. 
 
 # Command Line Use
-See `python ogr2ifc.py -h` for command line use.
+Type `python ogr2ifc.py -h` for help with the command line use.
 
 Example use in command line:
 ```
 python ogr2ifc.py gis2bim.ifc polygons.shp -top 520 -bottom 450
 ```
 
-# Python Module
+# Python Module Use
 The python classes offer more flexibility and functionality, including coordinate transformations.
 See the main conversion class `Ogr2Ifc` for details.
 
@@ -72,7 +72,7 @@ Multiple [IfcShapeRepresentations](https://standards.buildingsmart.org/IFC/DEV/I
 
 <table>
   <tr>
-    <th rowspan="2"><code>Ogr2Ifc</code> Attribute / IFC Identifier</th>
+    <th rowspan="2"><code>Ogr2Ifc</code> Attribute <br>(IFC shape representation identifier)</th>
     <th rowspan="2">Description</th>
     <th colspan="4">Implemented for <a href="https://gdal.org/doxygen/classOGRGeometry.html">OGRGeometry Class</a></th>
   </tr>
@@ -127,7 +127,7 @@ o2i.Box = False
 ```
 
 # Transformation
-To convert coordinates from a GIS `WorldCoordinateSystem`
+To convert coordinates from a GIS *WorldCoordinateSystem*
 to the IFC project coordinate system, a function can be 
 created and passed to the converter as follows:
 

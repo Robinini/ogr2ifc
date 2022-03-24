@@ -494,6 +494,7 @@ class Ogr2Shape:
 if __name__ == '__main__':
 
     # Command line operation
+    # ToDo: Add coord trans values
 
     parser = argparse.ArgumentParser(description='Convert an ogc supported vector format file to an IFC file')
     parser.add_argument('dst_ifc_file', help='destination IFC file to be created')
